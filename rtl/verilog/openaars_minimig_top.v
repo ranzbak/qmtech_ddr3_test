@@ -63,10 +63,10 @@ module openaars_minimig_top(
     /*
      * DDR interface
      */
-    reg   [27:0]    app_addr = 27'h0;
+    reg   [27:0]    app_addr = 28'h0;
     reg   [2:0]     app_cmd = 3'h0;
     reg             app_en = 1'b0;
-    reg   [127:0]   app_wdf_data = 127'h0;
+    reg   [127:0]   app_wdf_data = 128'h0;
     reg             app_wdf_end = 1'b0;
     reg             app_wdf_wren = 1'b0;
     wire  [127:0]   app_rd_data;

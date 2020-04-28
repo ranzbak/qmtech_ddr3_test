@@ -54,6 +54,7 @@ module openaars_minimig_top(
     
     // System wires
     wire           clk;
+    wire           ui_clk;
     //wire           clk200;
     wire           locked;
     
@@ -61,33 +62,23 @@ module openaars_minimig_top(
     reg             r_core_led = 1'b0;
     
     /*
-     * DDR interface
-     */
-    reg   [27:0]    app_addr = 28'h0;
-    reg   [2:0]     app_cmd = 3'h0;
-    reg             app_en = 1'b0;
-    reg   [127:0]   app_wdf_data = 128'h0;
-    reg             app_wdf_end = 1'b0;
-    reg             app_wdf_wren = 1'b0;
-    wire  [127:0]   app_rd_data;
-    wire            app_rd_data_end;
-    wire            app_rd_data_valid;
-    wire            app_rdy;
-    wire            app_wdf_rdy;
-    reg             app_sr_req = 1'b0;
-    reg             app_ref_req = 1'b0;
-    reg             app_zq_req = 1'b0;
-    wire            app_sr_active;
-    wire            app_ref_ack;
-    wire            app_zq_ack;
-    wire            ui_clk;
-    wire            ui_clk_sync_rst;
-    wire  [15:0]    app_wdf_mask = 16'h0000;
-    
-    /*
      * Open AARS wires
      */
-    reg   [7:0]     r_leds = 8'h0;  
+    reg   [7:0]     r_leds = 8'b1;  
+    
+    /*
+     * Wrapper interface
+     */
+    reg     [31:0]  r_Addr;   // Address bus (Upper part not used)
+    reg             r_CS;     // Chip select 
+    reg             r_L;      // Low byte [0:7]
+    reg             r_U;      // High byte [8:15] 
+    reg             r_WE;     // Write enable
+    reg     [15:0]  r_WR;     // Data to write
+    wire    [15:0]  w_RD;     // Data to read
+    wire            w_ready;  // Transaction ready
+    wire            w_busy;   // High during transactions when busy
+    
     
    // Clock IP
    clk_wiz_0 instance_name
@@ -102,58 +93,164 @@ module openaars_minimig_top(
     );
     
     // Enable LED on the board as test
-    always @(posedge clk) begin
+    always @(posedge ui_clk) begin
         // Turn on LED
-        r_core_led <= 1'b0;
-        // Turn on all LEDS
-        r_leds <= 8'h0;
+        r_core_led <= 1'b1;
     end
     
-    // Instantiating the DDR3 controller
-    mig_7series_1_1 u_mig_7series_1_1 (
+    // SDRAM wrapper
+    sdram_ddr_wrapper my_sdram (
+        .clk(clk),
+        .i_rst(~locked),
+        .o_ui_clk(ui_clk),
+        
+        //// SRAM like interface ////
+        // cpu (Fast memory)
+        .wrap_Addr(r_Addr),     // Address bus (Upper part not used)
+        .wrap_CS(r_CS),         // Chip select 
+        .wrap_L(r_L),           // Low byte [0:7]
+        .wrap_U(r_U),           // High byte [8:15] 
+        .wrap_WE(r_WE),         // Write enable
+        .wrap_WR(r_WR),         // Data to write
+        .wrap_RD(w_RD),         // Data to read
+        .wrap_ready(w_ready),   // Transaction ready
+        .wrap_busy(w_busy),     // High during transactions
 
-    // Memory interface ports
-    .ddr3_addr                      (ddr3_addr),  // output [13:0]		ddr3_addr
-    .ddr3_ba                        (ddr3_ba),  // output [2:0]		ddr3_ba
-    .ddr3_cas_n                     (ddr3_cas_n),  // output			ddr3_cas_n
-    .ddr3_ck_n                      (ddr3_ck_n),  // output [0:0]		ddr3_ck_n
-    .ddr3_ck_p                      (ddr3_ck_p),  // output [0:0]		ddr3_ck_p
-    .ddr3_cke                       (ddr3_cke),  // output [0:0]		ddr3_cke
-    .ddr3_ras_n                     (ddr3_ras_n),  // output			ddr3_ras_n
-    .ddr3_reset_n                   (ddr3_reset_n),  // output			ddr3_reset_n
-    .ddr3_we_n                      (ddr3_we_n),  // output			ddr3_we_n
-    .ddr3_dq                        (ddr3_dq),  // inout [15:0]		ddr3_dq
-    .ddr3_dqs_n                     (ddr3_dqs_n),  // inout [1:0]		ddr3_dqs_n
-    .ddr3_dqs_p                     (ddr3_dqs_p),  // inout [1:0]		ddr3_dqs_p
-    .init_calib_complete            (init_calib_complete),  // output			init_calib_complete
+        
+        //// SDRAM DDR3 ////
+        
+        // DDR3 Inouts
+        .ddr3_dq(ddr3_dq),        
+        .ddr3_dqs_n(ddr3_dqs_n),
+        .ddr3_dqs_p(ddr3_dqs_p),
       
-    .ddr3_dm                        (ddr3_dm),  // output [1:0]		ddr3_dm
-    .ddr3_odt                       (ddr3_odt),  // output [0:0]		ddr3_odt
-    // Application interface ports
-    .app_addr                       (app_addr),  // input [27:0]		app_addr
-    .app_cmd                        (app_cmd),  // input [2:0]		app_cmd
-    .app_en                         (app_en),  // input				app_en
-    .app_wdf_data                   (app_wdf_data),  // input [127:0]		app_wdf_data
-    .app_wdf_end                    (app_wdf_end),  // input				app_wdf_end
-    .app_wdf_wren                   (app_wdf_wren),  // input				app_wdf_wren
-    .app_rd_data                    (app_rd_data),  // output [127:0]		app_rd_data
-    .app_rd_data_end                (app_rd_data_end),  // output			app_rd_data_end
-    .app_rd_data_valid              (app_rd_data_valid),  // output			app_rd_data_valid
-    .app_rdy                        (app_rdy),  // output			app_rdy
-    .app_wdf_rdy                    (app_wdf_rdy),  // output			app_wdf_rdy
-    .app_sr_req                     (app_sr_req),  // input			app_sr_req
-    .app_ref_req                    (app_ref_req),  // input			app_ref_req
-    .app_zq_req                     (app_zq_req),  // input			app_zq_req
-    .app_sr_active                  (app_sr_active),  // output			app_sr_active
-    .app_ref_ack                    (app_ref_ack),  // output			app_ref_ack
-    .app_zq_ack                     (app_zq_ack),  // output			app_zq_ack
-    .ui_clk                         (ui_clk),  // output			ui_clk
-    .ui_clk_sync_rst                (ui_clk_sync_rst),  // output			ui_clk_sync_rst
-    .app_wdf_mask                   (app_wdf_mask),  // input [15:0]		app_wdf_mask
-    // System Clock Ports
-    .sys_clk_i                      (clk),
-    .sys_rst                        (1'b0) // input sys_rst
+        // DDR3 Outputs
+        .ddr3_addr(ddr3_addr),
+        .ddr3_ba(ddr3_ba),
+        .ddr3_ras_n(ddr3_ras_n),
+        .ddr3_cas_n(ddr3_cas_n),
+        .ddr3_we_n(ddr3_we_n),
+        .ddr3_reset_n(ddr3_reset_n),
+        .ddr3_ck_p(ddr3_ck_p),
+        .ddr3_ck_n(ddr3_ck_n),
+        .ddr3_cke(ddr3_cke),
+        
+        .ddr3_dm(ddr3_dm),
+        
+        .ddr3_odt(ddr3_odt),
+        
+        .tg_compare_error(tg_compare_error),
+        .init_calib_complete(init_calib_complete)
     );
+
+    //// Test machine ////
+    
+    // Test machine states
+    localparam STATE_IDLE       = 0;
+    localparam STATE_WRITE      = 1;
+    localparam STATE_WRITE_DONE = 2;
+    localparam STATE_READ       = 3;
+    localparam STATE_READ_DONE  = 4;
+
+
+    // Test machine
+    reg [4:0] test_state = STATE_IDLE;
+    reg [28:0] r_cur_addr = 29'b0;
+    always @(posedge ui_clk) begin
+        case (test_state)
+            STATE_IDLE: begin
+                if (w_busy == 1'b0) begin
+                    test_state <= STATE_WRITE;
+                end
+            end
+            STATE_WRITE: begin
+                r_CS <= 1'b1;
+                r_WR <= r_cur_addr[15:0];
+                r_Addr <= {3'b000, r_cur_addr};
+                r_WE <= 1'b1;
+                r_L <= 1'b1;
+                r_U <= 1'b1;
+                test_state <= STATE_WRITE_DONE;
+            end
+            STATE_WRITE_DONE: begin
+                // Deassert signals
+                if(w_busy == 1'b1) begin
+                    r_CS <= 1'b0;
+                    r_WR <= 16'h0;
+                    r_Addr <= 32'b0;
+                    r_L <= 1'b0;
+                    r_U <= 1'b0;
+                    r_WE <= 1'b0;
+                end
+
+                // When writing is done, proceed to the next stage
+                if (w_ready == 1'b1) begin
+                    test_state <= STATE_READ;
+                end
+            end
+            STATE_READ: begin
+                r_CS <= 1'b1;
+                r_Addr <= {3'b000, r_cur_addr};
+                r_WE <= 1'b0;
+                r_L <= 1'b1;
+                r_U <= 1'b1;
+                
+                test_state <= STATE_READ_DONE;
+            end
+            STATE_READ_DONE: begin
+                // Deassert signals
+                if (w_busy == 1'b1) begin
+                    r_CS <= 1'b0;
+                    r_Addr <= 32'b0;
+                    r_L <= 1'b0;
+                    r_U <= 1'b0;
+                end
+
+                // When the data is ready to be read
+                // Compare it to the data put in
+                if (w_ready == 1'b1 ) begin
+                    r_leds[0] <= 1'b1;
+                    r_leds[1] <= 1'b1;
+                    if (r_cur_addr[15:0] == w_RD) begin
+                        r_leds[0] <= 1'b0;
+                    end else begin
+                        r_leds[1] <= 1'b0;
+                    end
+                    
+                    if (r_cur_addr < 29'hfffffff) begin
+                        r_cur_addr <= r_cur_addr + 1;
+                    end else begin
+                        r_cur_addr <= 29'b0;
+                    end
+
+                    test_state <= STATE_WRITE;
+                end
+            end
+        endcase
+    end
+
+    
+    /*
+     * ILA debug core
+     */
+    ila_0 your_instance_name (
+        .clk(ui_clk), // input wire clk
+
+        .probe0(r_cur_addr),               // input wire [31:0] probe0
+        .probe1(r_CS),                 // input wire [0:0]  probe1
+        .probe2(r_L),                  // input wire [0:0]  probe2
+        .probe3(r_U),                  // input wire [0:0]  probe3
+        .probe4(r_WR),                 // input wire [15:0] probe4
+        .probe5(r_WE),                 // input wire        probe5
+        .probe6(w_RD),                 // input wire [15:0] probe6
+        .probe7(test_state),           // input wire [5:0]  probe7
+        .probe8(my_sdram.cache_state), // input with [5:0]  probe8
+        .probe9(w_busy),               // input wire        probe9
+        .probe10(my_sdram.v_l_found),  // input wire        probe10
+        .probe11(my_sdram.v_u_found),  // input wire        probe11
+        .probe12(o_leds[1])            // input wire        probe12 
+    );
+    
     
     /*
      * Assign registers to output

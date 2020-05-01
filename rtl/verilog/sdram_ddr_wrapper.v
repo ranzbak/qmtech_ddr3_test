@@ -20,6 +20,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 
+//`define ALI_DEBUG
+
 module sdram_ddr_wrapper (
     input clk,
     input i_rst,
@@ -80,10 +82,10 @@ module sdram_ddr_wrapper (
     //// CACHE registers
     reg [5:0]       cache_state = STATE_START;
     reg [1:0]       cache_ptr = 2'b0;
-    reg [3:0]       cache_e_set = 4'b0;
-    reg [15:0]      cache_e_mask  [3:0];
-    reg [127:0]     cache_e_data  [3:0];
-    reg [27:0]      cache_e_addr  [3:0];    
+    reg [2:0]       cache_e_set = 3'b0;
+    reg [15:0]      cache_e_mask  [0:3];
+    reg [127:0]     cache_e_data  [0:3];
+    reg [27:0]      cache_e_addr  [0:3];    
     
     //// MIG interface ////
     reg   [27:0]    app_addr = 28'h0;
@@ -146,9 +148,9 @@ module sdram_ddr_wrapper (
             v_u_found = 1'b0;
 
             // Check if in cache, if it is return value
-            if (wrap_L) begin // Did we request the low byte?
+            if (r_L) begin // Did we request the low byte?
                 // Low byte
-                for (read_loop = 0; read_loop < 4; read_loop = read_loop+1) begin
+                for (read_loop = 0; read_loop < 4; read_loop = read_loop + 1) begin
                     if((cache_e_set[read_loop] == 1'b1) && (`M_CACHE_ADDR(r_Addr) == cache_e_addr[read_loop])) begin
                         r_RD[7:0] <= cache_e_data[read_loop][(r_Addr[3:0])*8 +: 8]; // Select lower byte from cache
                         v_l_found = 1'b1; // Indicate we found the Low byte
@@ -164,10 +166,10 @@ module sdram_ddr_wrapper (
             end
 
             // Check if in cache, if it is return value
-            if (wrap_U) begin // Did we request the low byte?
+            if (r_U) begin // Did we request the low byte?
                 v_u_Addr = r_Addr + 1;
                 // Low byte
-                for (read_loop = 0; read_loop < 4; read_loop = read_loop+1) begin
+                for (read_loop = 0; read_loop < 4; read_loop = read_loop + 1) begin
                     if((cache_e_set[read_loop] == 1'b1) && (`M_CACHE_ADDR(v_u_Addr) == cache_e_addr[read_loop])) begin
                         r_RD[15:8] <= cache_e_data[read_loop][(v_u_Addr[3:0])*8 +: 8]; // Select lower byte from cache
                         v_u_found = 1'b1; // Indicate we found the Low byte
@@ -180,6 +182,12 @@ module sdram_ddr_wrapper (
             end 
             else begin // Low byte not requested
                 r_RD[7:0] = 8'h00;
+            end
+
+            // If both upper and lower byte are found set ready flag
+            // and return to idle
+            if (v_l_found == 1'b1 && v_u_found == 1'b1) begin
+                r_ready <= 1'b1; 
             end
         end
     endtask
@@ -196,7 +204,7 @@ module sdram_ddr_wrapper (
             v_u_found = 1'b0;
 
             // Check if in cache, if it is return value
-            if (wrap_L) begin // Did we request the low byte?
+            if (r_L) begin // Did we request the low byte?
                 // Low byte
                 for (write_loop = 0; write_loop < 4; write_loop = write_loop+1) begin
                     if((cache_e_set[write_loop] == 1'b1) && (`M_CACHE_ADDR(r_Addr) == cache_e_addr[write_loop])) begin
@@ -215,7 +223,7 @@ module sdram_ddr_wrapper (
             end
 
             // Check if in cache, if it is return value
-            if (wrap_U) begin // Did we request the low byte?
+            if (r_U) begin // Did we request the low byte?
                 v_u_Addr = r_Addr + 1;
                 // Low byte
                 for (write_loop = 0; write_loop < 4; write_loop = write_loop+1) begin
@@ -232,6 +240,12 @@ module sdram_ddr_wrapper (
             end 
             else begin // Low byte not requested
                 r_RD[7:0] = 8'h00;
+            end
+
+            // If both upper and lower byte are found set ready flag
+            // and return to idle
+            if (v_l_found == 1'b1 && v_u_found == 1'b1) begin
+                r_ready <= 1'b1; 
             end
         end
     endtask
@@ -278,6 +292,8 @@ module sdram_ddr_wrapper (
               cache_e_set[cache_ptr] <= 1'b1;         // Set value as being occupied
               cache_e_mask[cache_ptr] <= 16'h0;         // No data changed yet
               cache_e_addr[cache_ptr] <= r_SD_Addr;     // Store address of page
+
+              // Advance pointer when read is done
               cache_ptr <= cache_ptr + 1;               // Next cache position
 
               // When done reading, return to the cache read or write
@@ -355,7 +371,7 @@ module sdram_ddr_wrapper (
             end
             // Read from cache, if not available read from SDRAM
             STATE_READ_CACHE: begin
-                task_read_cache(STATE_RETURN_RESULT, STATE_UPDATE_ENTRY);
+                task_read_cache(STATE_IDLE, STATE_UPDATE_ENTRY);
             end
             STATE_UPDATE_ENTRY: begin
                 task_update_entry(STATE_WRITE_SDRAM, STATE_READ_SDRAM);
@@ -370,7 +386,7 @@ module sdram_ddr_wrapper (
             end
             // Write to cache, if not available read from SDRAM
             STATE_WRITE_CACHE: begin
-                task_write_cache(STATE_RETURN_RESULT, STATE_UPDATE_ENTRY);
+                task_write_cache(STATE_IDLE, STATE_UPDATE_ENTRY);
             end
             // Write to SDRAM
             STATE_WRITE_SDRAM: begin
@@ -441,4 +457,35 @@ module sdram_ddr_wrapper (
     .sys_clk_i                      (clk),
     .sys_rst                        (i_rst) // input sys_rst
     );
+
+    /*
+    *       //// CACHE registers
+      reg [5:0]       cache_state = STATE_START;
+      reg [2:0]       cache_ptr = 3'b0;
+      reg [2:0]       cache_e_set = 3'b0;
+      reg [15:0]      cache_e_mask  [3:0];
+      reg [127:0]     cache_e_data  [3:0];
+      reg [27:0]      cache_e_addr  [3:0];  
+      */
+
+`ifdef ALI_DEBUG
+    ila_1 your_instance_name (
+        .clk(ui_clk), // input wire clk
+
+        .probe0(cache_e_mask[0]), // input wire [15:0]  probe0  
+        .probe1(cache_e_data[0]), // input wire [127:0]  probe1 
+        .probe2(cache_e_data[1]), // input wire [127:0]  probe2 
+        .probe3(cache_e_data[2]), // input wire [127:0]  probe3 
+        .probe4(app_rd_data), // input wire [127:0]  probe4 
+        .probe5(cache_e_addr[0]), // input wire [27:0]  probe5 
+        .probe6(cache_e_addr[1]), // input wire [27:0]  probe6 
+        .probe7(cache_e_addr[2]), // input wire [27:0]  probe7 
+        .probe8(cache_e_addr[3]), // input wire [27:0]  probe8 
+        .probe9(cache_state), // input wire [5:0]  probe9 
+        .probe10(cache_ptr), // input wire [2:0]  probe10 
+        .probe11(cache_e_mask[1]) // input wire [15:0]  probe11
+    );
+`endif
+
 endmodule
+// Advance pointer when read is donepp_rd_data

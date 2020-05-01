@@ -19,6 +19,7 @@
 // 
 //////////////////////////////////////////////////////////////////////////////////
 
+`define ALI_DEBUG
 
 module openaars_minimig_top(
     // Core board
@@ -58,17 +59,13 @@ module openaars_minimig_top(
     //wire           clk200;
     wire           locked;
     
-    // Core board LED
+    //// Core board LED ////
     reg             r_core_led = 1'b0;
     
-    /*
-     * Open AARS wires
-     */
+    //// Open AARS wires ////
     reg   [7:0]     r_leds = 8'b1;  
     
-    /*
-     * Wrapper interface
-     */
+    //// Wrapper interface ////
     reg     [31:0]  r_Addr;   // Address bus (Upper part not used)
     reg             r_CS;     // Chip select 
     reg             r_L;      // Low byte [0:7]
@@ -78,11 +75,13 @@ module openaars_minimig_top(
     wire    [15:0]  w_RD;     // Data to read
     wire            w_ready;  // Transaction ready
     wire            w_busy;   // High during transactions when busy
+
+    // Pattern generator
+    reg             r_flip_pat = 1'b0; // Flip the pattern
     
-    
-   // Clock IP
-   clk_wiz_0 instance_name
-   (
+    // Clock IP
+    clk_wiz_0 instance_name
+    (
         // Clock out ports
         //.clk_out166(clk),      // output clk_out100
         .clk_out200(clk),   // output clk_out200
@@ -156,6 +155,7 @@ module openaars_minimig_top(
     // Test machine
     reg [4:0] test_state = STATE_IDLE;
     reg [28:0] r_cur_addr = 29'b0;
+    reg [15:0] v_pattern;
     always @(posedge ui_clk) begin
         case (test_state)
             STATE_IDLE: begin
@@ -165,7 +165,7 @@ module openaars_minimig_top(
             end
             STATE_WRITE: begin
                 r_CS <= 1'b1;
-                r_WR <= r_cur_addr[15:0];
+                r_WR <= (r_flip_pat == 1'b0 ? r_cur_addr[15:0] : ~r_cur_addr[15:0]);
                 r_Addr <= {3'b000, r_cur_addr};
                 r_WE <= 1'b1;
                 r_L <= 1'b1;
@@ -211,16 +211,19 @@ module openaars_minimig_top(
                 if (w_ready == 1'b1 ) begin
                     r_leds[0] <= 1'b1;
                     r_leds[1] <= 1'b1;
-                    if (r_cur_addr[15:0] == w_RD) begin
+
+                    v_pattern = (r_flip_pat == 1'b0 ? r_cur_addr[15:0] : ~r_cur_addr[15:0]);
+                    if (v_pattern == w_RD) begin
                         r_leds[0] <= 1'b0;
                     end else begin
                         r_leds[1] <= 1'b0;
                     end
                     
                     if (r_cur_addr < 29'hfffffff) begin
-                        r_cur_addr <= r_cur_addr + 1;
+                        r_cur_addr <= r_cur_addr + 50;
                     end else begin
                         r_cur_addr <= 29'b0;
+                        r_flip_pat <= ~r_flip_pat;
                     end
 
                     test_state <= STATE_WRITE;
@@ -229,14 +232,14 @@ module openaars_minimig_top(
         endcase
     end
 
-    
+`ifdef ALI_DEBUG
     /*
      * ILA debug core
      */
     ila_0 your_instance_name (
         .clk(ui_clk), // input wire clk
 
-        .probe0(r_cur_addr),               // input wire [31:0] probe0
+        .probe0(r_cur_addr),           // input wire [31:0] probe0
         .probe1(r_CS),                 // input wire [0:0]  probe1
         .probe2(r_L),                  // input wire [0:0]  probe2
         .probe3(r_U),                  // input wire [0:0]  probe3
@@ -247,9 +250,11 @@ module openaars_minimig_top(
         .probe8(my_sdram.cache_state), // input with [5:0]  probe8
         .probe9(w_busy),               // input wire        probe9
         .probe10(my_sdram.v_l_found),  // input wire        probe10
-        .probe11(my_sdram.v_u_found),  // input wire        probe11
-        .probe12(o_leds[1])            // input wire        probe12 
+        .probe11(w_ready),             // input wire        probe11
+        .probe12(o_leds[1]),           // input wire        probe12 
+        .probe13(r_Addr)               // input wire [31:0] probe13
     );
+`endif
     
     
     /*

@@ -37,7 +37,7 @@ module sdram_ddr_wrapper (
     input       [15:0] wrap_WR,     // Data to write
     input              wrap_big_r,  // Indicate the reading of an additional 48-bits
     output      [15:0] wrap_RD,     // Data to read
-    output             wrap_RD48,   // Additional 48-bit output
+    output      [47:0] wrap_RD48,   // Additional 48-bit output
     output             wrap_ready,  // Transaction ready
     output             wrap_busy,   // Keeps being high during transactions
     
@@ -122,7 +122,7 @@ module sdram_ddr_wrapper (
     reg             r_L;        // Low byte [0:7]
     reg             r_U;        // High byte [8:15] 
     reg     [15:0]  r_WR;       // Data to write
-    reg     [15:0]  r_RD;       // Data to read
+    reg     [63:0]  r_RD;       // Data to read
     reg             r_busy = 1'b1;     // Machine busy
     reg             r_ready = 1'b0;    // Transaction ready
     reg     [27:0]  r_SD_Addr;  // Address to read from or write to in SD_RAM
@@ -142,8 +142,10 @@ module sdram_ddr_wrapper (
     `define M_CACHE_ADDR(addr) {addr[28:4],3'b000} 
     
     // Read Cache
+    integer byte_loop;
     integer read_loop;
-    reg [1:0]   v_byte_found; // Found higher byte?
+    reg [7:0]   v_byte_found; // Found higher byte?
+    reg [7:0]   v_byte_select; // Upper or lower byte select?
     reg [31:0]  v_u_Addr; // Higher byte variable
     task task_read_cache;
         input [5:0] next_state_found;
@@ -151,48 +153,39 @@ module sdram_ddr_wrapper (
         begin
             // Default action
             cache_state <= next_state_found;
-            v_byte_found = 2'b00;
+            v_byte_found = 8'h00;
+			v_byte_select[0] = r_L;
+			v_byte_select[1] = r_U;
+			if (wrap_big_r) begin
+				v_byte_select[7:2] = 6'h3f;
+			end
 
-            // Check if in cache, if it is return value
-            if (r_L) begin // Did we request the low byte?
-                // Low byte
-                for (read_loop = 0; read_loop < 4; read_loop = read_loop + 1) begin
-                    if((cache_e_set[read_loop] == 1'b1) && (`M_CACHE_ADDR(r_Addr) == cache_e_addr[read_loop])) begin
-                        r_RD[7:0] <= cache_e_data[read_loop][(r_Addr[3:0])*8 +: 8]; // Select lower byte from cache
-                        v_byte_found[0] = 1'b1; // Indicate we found the Low byte
-                    end
-                end
-                if (v_byte_found[0] == 1'b0) begin
-                    r_SD_Addr <= `M_CACHE_ADDR(r_Addr);
-                    cache_state <= next_state_notfound;
-                end
-            end 
-            else begin // Low byte not requested
-                r_RD[7:0] = 8'h00;
-            end
-
-            // Check if in cache, if it is return value
-            if (r_U) begin // Did we request the low byte?
-                v_u_Addr = r_Addr + 1;
-                // Low byte
-                for (read_loop = 0; read_loop < 4; read_loop = read_loop + 1) begin
-                    if((cache_e_set[read_loop] == 1'b1) && (`M_CACHE_ADDR(v_u_Addr) == cache_e_addr[read_loop])) begin
-                        r_RD[15:8] <= cache_e_data[read_loop][(v_u_Addr[3:0])*8 +: 8]; // Select lower byte from cache
-                        v_byte_found[1] = 1'b1; // Indicate we found the Low byte
-                    end
-                end
-                if (v_byte_found[1] == 1'b0) begin
-                    r_SD_Addr <= `M_CACHE_ADDR(v_u_Addr);
-                    cache_state <= next_state_notfound;
-                end
-            end 
-            else begin // Low byte not requested
-                r_RD[7:0] = 8'h00;
-            end
+			// Writing is only done to cache, the cache is written to cache on a replace action
+			// The outer loop that looks up the bytes it needs to write
+			// The inner for loop creates the intries to look into the different cache registers
+			for (byte_loop = 0; byte_loop < 8; byte_loop = byte_loop+1) begin
+				if (v_byte_select[byte_loop]) begin // Did we request the low byte?
+					v_u_Addr = r_Addr + byte_loop;
+					// Check if in cache, if it is return value
+					for (read_loop = 0; read_loop < 4; read_loop = read_loop + 1) begin
+						if((cache_e_set[read_loop] == 1'b1) && (`M_CACHE_ADDR(v_u_Addr) == cache_e_addr[read_loop])) begin
+							r_RD[byte_loop*8 +: 8] <= cache_e_data[read_loop][(v_u_Addr[3:0])*8 +: 8]; // Select lower byte from cache
+							v_byte_found[byte_loop] = 1'b1; // Indicate we found the Low byte
+						end
+					end
+					if (v_byte_found[byte_loop] == 1'b0) begin
+						r_SD_Addr <= `M_CACHE_ADDR(v_u_Addr);
+						cache_state <= next_state_notfound;
+					end
+				end 
+				else begin // Low byte not requested
+					r_RD[byte_loop*8 +: 8] = 8'h00;
+				end
+			end
 
             // If both upper and lower byte are found set ready flag
             // and return to idle
-            if (v_byte_found == 2'b11) begin
+            if (v_byte_found == v_byte_select) begin
                 r_ready <= 1'b1; 
             end
         end
@@ -206,50 +199,36 @@ module sdram_ddr_wrapper (
         begin
             // Default action
             cache_state <= next_state_found;
-            v_byte_found = 2'b00;
+            v_byte_found = 8'b00;
+            v_byte_select[0] = r_L;
+            v_byte_select[1] = r_U;
+			v_byte_select[7:2] = 6'h00;
 
-            // Check if in cache, if it is return value
-            if (r_L) begin // Did we request the low byte?
-                // Low byte
-                for (write_loop = 0; write_loop < 4; write_loop = write_loop+1) begin
-                    if((cache_e_set[write_loop] == 1'b1) && (`M_CACHE_ADDR(r_Addr) == cache_e_addr[write_loop])) begin
-                        cache_e_data[write_loop][(r_Addr[3:0])*8 +: 8] <= r_WR[7:0]; // Select lower byte from cache
-                        cache_e_mask[write_loop][r_Addr[3:0]] <= 1'b1;
-                        v_byte_found[0] = 1'b1; // Indicate we found the Low byte
+			// Writing is only done to cache, the cache is written to cache on a replace action
+			// The outer loop that looks up the bytes it needs to write
+			// The inner for loop creates the intries to look into the different cache registers
+            for (byte_loop = 0; byte_loop < 2; byte_loop = byte_loop + 1) begin
+                // Check if in cache, if it is return value
+                if (v_byte_select[byte_loop]) begin // Did we request the low byte?
+                    v_u_Addr = r_Addr + byte_loop;
+					// Check if in cache, if it is return value
+                    for (write_loop = 0; write_loop < 4; write_loop = write_loop+1) begin
+                        if((cache_e_set[write_loop] == 1'b1) && (`M_CACHE_ADDR(v_u_Addr) == cache_e_addr[write_loop])) begin
+                            cache_e_data[write_loop][(v_u_Addr[3:0])*8 +: 8] <= r_WR[byte_loop*8 +: 8]; // Select lower byte from cache
+                            cache_e_mask[write_loop][v_u_Addr[3:0]] <= 1'b1;
+                            v_byte_found[byte_loop] = 1'b1; // Indicate we found the Low byte
+                        end
                     end
-                end
-                if (v_byte_found[0] == 1'b0) begin
-                    r_SD_Addr <= `M_CACHE_ADDR(r_Addr);
-                    cache_state <= next_state_notfound;
-                end
-            end 
-            else begin // Low byte not requested
-                r_RD[7:0] = 8'h00;
-            end
-
-            // Check if in cache, if it is return value
-            if (r_U) begin // Did we request the low byte?
-                v_u_Addr = r_Addr + 1;
-                // Low byte
-                for (write_loop = 0; write_loop < 4; write_loop = write_loop+1) begin
-                    if((cache_e_set[write_loop] == 1'b1) && (`M_CACHE_ADDR(v_u_Addr) == cache_e_addr[write_loop])) begin
-                        cache_e_data[write_loop][(v_u_Addr[3:0])*8 +: 8] <= r_WR[15:8]; // Select lower byte from cache
-                        cache_e_mask[write_loop][v_u_Addr[3:0]] <= 1'b1;
-                        v_byte_found[1] = 1'b1; // Indicate we found the Low byte
+                    if (v_byte_found[byte_loop] == 1'b0) begin
+                        r_SD_Addr <= `M_CACHE_ADDR(v_u_Addr);
+                        cache_state <= next_state_notfound;
                     end
-                end
-                if (v_byte_found[1] == 1'b0) begin
-                    r_SD_Addr <= `M_CACHE_ADDR(v_u_Addr);
-                    cache_state <= next_state_notfound;
-                end
-            end 
-            else begin // Low byte not requested
-                r_RD[7:0] = 8'h00;
+                end 
             end
 
             // If both upper and lower byte are found set ready flag
             // and return to idle
-            if (v_byte_found == 2'b11) begin
+            if (v_byte_found == v_byte_select) begin
                 r_ready <= 1'b1; 
             end
         end
@@ -411,7 +390,8 @@ module sdram_ddr_wrapper (
 
     // output
     assign wrap_ready = r_ready;
-    assign wrap_RD = r_RD;
+    assign wrap_RD = r_RD[15:0];
+	assign wrap_RD48 = r_RD[63:16];
     assign wrap_ready = r_ready;
     assign wrap_busy = r_busy;
     assign o_ui_clk = ui_clk;
@@ -420,47 +400,47 @@ module sdram_ddr_wrapper (
     // Instantiating the DDR3 controller
     mig_7series_1_1 u_mig_7series_1_1 (
 
-    // Memory interface ports
-    .ddr3_addr                      (ddr3_addr),  // output [13:0]		ddr3_addr
-    .ddr3_ba                        (ddr3_ba),  // output [2:0]		ddr3_ba
-    .ddr3_cas_n                     (ddr3_cas_n),  // output			ddr3_cas_n
-    .ddr3_ck_n                      (ddr3_ck_n),  // output [0:0]		ddr3_ck_n
-    .ddr3_ck_p                      (ddr3_ck_p),  // output [0:0]		ddr3_ck_p
-    .ddr3_cke                       (ddr3_cke),  // output [0:0]		ddr3_cke
-    .ddr3_ras_n                     (ddr3_ras_n),  // output			ddr3_ras_n
-    .ddr3_reset_n                   (ddr3_reset_n),  // output			ddr3_reset_n
-    .ddr3_we_n                      (ddr3_we_n),  // output			ddr3_we_n
-    .ddr3_dq                        (ddr3_dq),  // inout [15:0]		ddr3_dq
-    .ddr3_dqs_n                     (ddr3_dqs_n),  // inout [1:0]		ddr3_dqs_n
-    .ddr3_dqs_p                     (ddr3_dqs_p),  // inout [1:0]		ddr3_dqs_p
-    .init_calib_complete            (init_calib_complete),  // output			init_calib_complete
-      
-    .ddr3_dm                        (ddr3_dm),  // output [1:0]		ddr3_dm
-    .ddr3_odt                       (ddr3_odt),  // output [0:0]		ddr3_odt
-    // Application interface ports
-    .app_addr                       (app_addr),  // input [27:0]		app_addr
-    .app_cmd                        (app_cmd),  // input [2:0]		app_cmd
-    .app_en                         (app_en),  // input				app_en
-    .app_wdf_data                   (app_wdf_data),  // input [127:0]		app_wdf_data
-    .app_wdf_end                    (app_wdf_end),  // input				app_wdf_end
-    .app_wdf_wren                   (app_wdf_wren),  // input				app_wdf_wren
-    .app_rd_data                    (app_rd_data),  // output [127:0]		app_rd_data
-    .app_rd_data_end                (app_rd_data_end),  // output			app_rd_data_end
-    .app_rd_data_valid              (app_rd_data_valid),  // output			app_rd_data_valid
-    .app_rdy                        (app_rdy),  // output			app_rdy
-    .app_wdf_rdy                    (app_wdf_rdy),  // output			app_wdf_rdy
-    .app_sr_req                     (app_sr_req),  // input			app_sr_req
-    .app_ref_req                    (app_ref_req),  // input			app_ref_req
-    .app_zq_req                     (app_zq_req),  // input			app_zq_req
-    .app_sr_active                  (app_sr_active),  // output			app_sr_active
-    .app_ref_ack                    (app_ref_ack),  // output			app_ref_ack
-    .app_zq_ack                     (app_zq_ack),  // output			app_zq_ack
-    .ui_clk                         (ui_clk),  // output			ui_clk
-    .ui_clk_sync_rst                (ui_clk_sync_rst),  // output			ui_clk_sync_rst
-    .app_wdf_mask                   (app_wdf_mask),  // input [15:0]		app_wdf_mask
-    // System Clock Ports
-    .sys_clk_i                      (clk),
-    .sys_rst                        (i_rst) // input sys_rst
+		// Memory interface ports
+		.ddr3_addr                      (ddr3_addr),  // output [13:0]		ddr3_addr
+		.ddr3_ba                        (ddr3_ba),  // output [2:0]		ddr3_ba
+		.ddr3_cas_n                     (ddr3_cas_n),  // output			ddr3_cas_n
+		.ddr3_ck_n                      (ddr3_ck_n),  // output [0:0]		ddr3_ck_n
+		.ddr3_ck_p                      (ddr3_ck_p),  // output [0:0]		ddr3_ck_p
+		.ddr3_cke                       (ddr3_cke),  // output [0:0]		ddr3_cke
+		.ddr3_ras_n                     (ddr3_ras_n),  // output			ddr3_ras_n
+		.ddr3_reset_n                   (ddr3_reset_n),  // output			ddr3_reset_n
+		.ddr3_we_n                      (ddr3_we_n),  // output			ddr3_we_n
+		.ddr3_dq                        (ddr3_dq),  // inout [15:0]		ddr3_dq
+		.ddr3_dqs_n                     (ddr3_dqs_n),  // inout [1:0]		ddr3_dqs_n
+		.ddr3_dqs_p                     (ddr3_dqs_p),  // inout [1:0]		ddr3_dqs_p
+		.init_calib_complete            (init_calib_complete),  // output			init_calib_complete
+		  
+		.ddr3_dm                        (ddr3_dm),  // output [1:0]		ddr3_dm
+		.ddr3_odt                       (ddr3_odt),  // output [0:0]		ddr3_odt
+		// Application interface ports
+		.app_addr                       (app_addr),  // input [27:0]		app_addr
+		.app_cmd                        (app_cmd),  // input [2:0]		app_cmd
+		.app_en                         (app_en),  // input				app_en
+		.app_wdf_data                   (app_wdf_data),  // input [127:0]		app_wdf_data
+		.app_wdf_end                    (app_wdf_end),  // input				app_wdf_end
+		.app_wdf_wren                   (app_wdf_wren),  // input				app_wdf_wren
+		.app_rd_data                    (app_rd_data),  // output [127:0]		app_rd_data
+		.app_rd_data_end                (app_rd_data_end),  // output			app_rd_data_end
+		.app_rd_data_valid              (app_rd_data_valid),  // output			app_rd_data_valid
+		.app_rdy                        (app_rdy),  // output			app_rdy
+		.app_wdf_rdy                    (app_wdf_rdy),  // output			app_wdf_rdy
+		.app_sr_req                     (app_sr_req),  // input			app_sr_req
+		.app_ref_req                    (app_ref_req),  // input			app_ref_req
+		.app_zq_req                     (app_zq_req),  // input			app_zq_req
+		.app_sr_active                  (app_sr_active),  // output			app_sr_active
+		.app_ref_ack                    (app_ref_ack),  // output			app_ref_ack
+		.app_zq_ack                     (app_zq_ack),  // output			app_zq_ack
+		.ui_clk                         (ui_clk),  // output			ui_clk
+		.ui_clk_sync_rst                (ui_clk_sync_rst),  // output			ui_clk_sync_rst
+		.app_wdf_mask                   (app_wdf_mask),  // input [15:0]		app_wdf_mask
+		// System Clock Ports
+		.sys_clk_i                      (clk),
+		.sys_rst                        (i_rst) // input sys_rst
     );
 
     /*

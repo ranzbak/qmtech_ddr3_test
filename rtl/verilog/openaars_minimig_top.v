@@ -71,8 +71,9 @@ module openaars_minimig_top(
     reg             r_L;      // Low byte [0:7]
     reg             r_U;      // High byte [8:15] 
     reg             r_WE;     // Write enable
-    reg     [15:0]  r_WR;     // Data to write
-    wire    [15:0]  w_RD;     // Data to read
+    reg     [15:0]  r_WR;     // Data to write 16-bit
+    wire    [15:0]  w_RD;     // Data to read 16-bit
+    wire    [47:0]  w_RD48;   // Data to read additional 48-bit
     wire            w_ready;  // Transaction ready
     wire            w_busy;   // High during transactions when busy
 
@@ -112,6 +113,8 @@ module openaars_minimig_top(
         .wrap_WE(r_WE),         // Write enable
         .wrap_WR(r_WR),         // Data to write
         .wrap_RD(w_RD),         // Data to read
+        .wrap_RD48(w_RD48),     // Data to read 48-bits extra
+        .wrap_big_r(r_flip_pat),      // When asserted, read 64-bit instead of 16
         .wrap_ready(w_ready),   // Transaction ready
         .wrap_busy(w_busy),     // High during transactions
 
@@ -220,9 +223,9 @@ module openaars_minimig_top(
                     end
                     
                     if (r_cur_addr < 29'hfffffff) begin
-                        r_cur_addr <= r_cur_addr + 50;
+                        r_cur_addr <= r_cur_addr + 1;
                     end else begin
-                        r_cur_addr <= 29'b0;
+                        r_cur_addr <= r_cur_addr - 29'hfffffff;
                         r_flip_pat <= ~r_flip_pat;
                     end
 
@@ -245,7 +248,7 @@ module openaars_minimig_top(
         .probe3(r_U),                  // input wire [0:0]  probe3
         .probe4(r_WR),                 // input wire [15:0] probe4
         .probe5(r_WE),                 // input wire        probe5
-        .probe6(w_RD),                 // input wire [15:0] probe6
+        .probe6({w_RD, w_RD48}),       // input wire [63:0] probe6
         .probe7(test_state),           // input wire [5:0]  probe7
         .probe8(my_sdram.cache_state), // input with [5:0]  probe8
         .probe9(w_busy),               // input wire        probe9

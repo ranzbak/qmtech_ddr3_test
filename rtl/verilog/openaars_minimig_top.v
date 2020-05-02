@@ -249,7 +249,7 @@ module openaars_minimig_top(
         .probe7(test_state),           // input wire [5:0]  probe7
         .probe8(my_sdram.cache_state), // input with [5:0]  probe8
         .probe9(w_busy),               // input wire        probe9
-        .probe10(my_sdram.v_l_found),  // input wire        probe10
+        .probe10(my_sdram.v_byte_found[0]),  // input wire        probe10
         .probe11(w_ready),             // input wire        probe11
         .probe12(o_leds[1]),           // input wire        probe12 
         .probe13(r_Addr)               // input wire [31:0] probe13

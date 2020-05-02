@@ -35,10 +35,18 @@ module sdram_ddr_wrapper (
     input              wrap_U,      // High byte [8:15] 
     input              wrap_WE,     // Write enable
     input       [15:0] wrap_WR,     // Data to write
+    input              wrap_big_r,  // Indicate the reading of an additional 48-bits
     output      [15:0] wrap_RD,     // Data to read
+    output             wrap_RD48,   // Additional 48-bit output
     output             wrap_ready,  // Transaction ready
     output             wrap_busy,   // Keeps being high during transactions
     
+    // The big read transfers 48 bits in total, 
+    // [15:0]   wrap_RD
+    // [16:47]  wrap_RD48
+    // This to allow more memory bandwidth to the chipset
+    // The 64-bit bus created this way is read only
+
     //// SDRAM DDR3 ////
     
     // DDR3 Inouts
@@ -135,8 +143,7 @@ module sdram_ddr_wrapper (
     
     // Read Cache
     integer read_loop;
-    reg         v_l_found; // Found lower byte?
-    reg         v_u_found; // Found higher byte?
+    reg [1:0]   v_byte_found; // Found higher byte?
     reg [31:0]  v_u_Addr; // Higher byte variable
     task task_read_cache;
         input [5:0] next_state_found;
@@ -144,8 +151,7 @@ module sdram_ddr_wrapper (
         begin
             // Default action
             cache_state <= next_state_found;
-            v_l_found = 1'b0;
-            v_u_found = 1'b0;
+            v_byte_found = 2'b00;
 
             // Check if in cache, if it is return value
             if (r_L) begin // Did we request the low byte?
@@ -153,10 +159,10 @@ module sdram_ddr_wrapper (
                 for (read_loop = 0; read_loop < 4; read_loop = read_loop + 1) begin
                     if((cache_e_set[read_loop] == 1'b1) && (`M_CACHE_ADDR(r_Addr) == cache_e_addr[read_loop])) begin
                         r_RD[7:0] <= cache_e_data[read_loop][(r_Addr[3:0])*8 +: 8]; // Select lower byte from cache
-                        v_l_found = 1'b1; // Indicate we found the Low byte
+                        v_byte_found[0] = 1'b1; // Indicate we found the Low byte
                     end
                 end
-                if (v_l_found == 1'b0) begin
+                if (v_byte_found[0] == 1'b0) begin
                     r_SD_Addr <= `M_CACHE_ADDR(r_Addr);
                     cache_state <= next_state_notfound;
                 end
@@ -172,10 +178,10 @@ module sdram_ddr_wrapper (
                 for (read_loop = 0; read_loop < 4; read_loop = read_loop + 1) begin
                     if((cache_e_set[read_loop] == 1'b1) && (`M_CACHE_ADDR(v_u_Addr) == cache_e_addr[read_loop])) begin
                         r_RD[15:8] <= cache_e_data[read_loop][(v_u_Addr[3:0])*8 +: 8]; // Select lower byte from cache
-                        v_u_found = 1'b1; // Indicate we found the Low byte
+                        v_byte_found[1] = 1'b1; // Indicate we found the Low byte
                     end
                 end
-                if (v_u_found == 1'b0) begin
+                if (v_byte_found[1] == 1'b0) begin
                     r_SD_Addr <= `M_CACHE_ADDR(v_u_Addr);
                     cache_state <= next_state_notfound;
                 end
@@ -186,7 +192,7 @@ module sdram_ddr_wrapper (
 
             // If both upper and lower byte are found set ready flag
             // and return to idle
-            if (v_l_found == 1'b1 && v_u_found == 1'b1) begin
+            if (v_byte_found == 2'b11) begin
                 r_ready <= 1'b1; 
             end
         end
@@ -200,8 +206,7 @@ module sdram_ddr_wrapper (
         begin
             // Default action
             cache_state <= next_state_found;
-            v_l_found = 1'b0;
-            v_u_found = 1'b0;
+            v_byte_found = 2'b00;
 
             // Check if in cache, if it is return value
             if (r_L) begin // Did we request the low byte?
@@ -210,10 +215,10 @@ module sdram_ddr_wrapper (
                     if((cache_e_set[write_loop] == 1'b1) && (`M_CACHE_ADDR(r_Addr) == cache_e_addr[write_loop])) begin
                         cache_e_data[write_loop][(r_Addr[3:0])*8 +: 8] <= r_WR[7:0]; // Select lower byte from cache
                         cache_e_mask[write_loop][r_Addr[3:0]] <= 1'b1;
-                        v_l_found = 1'b1; // Indicate we found the Low byte
+                        v_byte_found[0] = 1'b1; // Indicate we found the Low byte
                     end
                 end
-                if (v_l_found == 1'b0) begin
+                if (v_byte_found[0] == 1'b0) begin
                     r_SD_Addr <= `M_CACHE_ADDR(r_Addr);
                     cache_state <= next_state_notfound;
                 end
@@ -230,10 +235,10 @@ module sdram_ddr_wrapper (
                     if((cache_e_set[write_loop] == 1'b1) && (`M_CACHE_ADDR(v_u_Addr) == cache_e_addr[write_loop])) begin
                         cache_e_data[write_loop][(v_u_Addr[3:0])*8 +: 8] <= r_WR[15:8]; // Select lower byte from cache
                         cache_e_mask[write_loop][v_u_Addr[3:0]] <= 1'b1;
-                        v_u_found = 1'b1; // Indicate we found the Low byte
+                        v_byte_found[1] = 1'b1; // Indicate we found the Low byte
                     end
                 end
-                if (v_u_found == 1'b0) begin
+                if (v_byte_found[1] == 1'b0) begin
                     r_SD_Addr <= `M_CACHE_ADDR(v_u_Addr);
                     cache_state <= next_state_notfound;
                 end
@@ -244,7 +249,7 @@ module sdram_ddr_wrapper (
 
             // If both upper and lower byte are found set ready flag
             // and return to idle
-            if (v_l_found == 1'b1 && v_u_found == 1'b1) begin
+            if (v_byte_found == 2'b11) begin
                 r_ready <= 1'b1; 
             end
         end

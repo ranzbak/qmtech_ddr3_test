@@ -23,9 +23,9 @@
 //`define ALI_DEBUG
 
 module sdram_ddr_wrapper (
-    input clk,
-    input i_rst,
-    output o_ui_clk,
+    input clk,          // SDRAM reference clock 200MHz
+    input i_rst,        // Synchronous reset
+    output o_ui_clk,    // output of the UI clock 200MHz
     
     //// SRAM like interface ////
     // cpu (Fast memory)
@@ -39,7 +39,6 @@ module sdram_ddr_wrapper (
     output      [15:0] wrap_RD,     // Data to read
     output      [47:0] wrap_RD48,   // Additional 48-bit output
     output             wrap_ready,  // Transaction ready
-    output             wrap_busy,   // Keeps being high during transactions
     
     // The big read transfers 48 bits in total, 
     // [15:0]   wrap_RD
@@ -123,7 +122,6 @@ module sdram_ddr_wrapper (
     reg             r_U;        // High byte [8:15] 
     reg     [15:0]  r_WR;       // Data to write
     reg     [63:0]  r_RD;       // Data to read
-    reg             r_busy = 1'b1;     // Machine busy
     reg             r_ready = 1'b0;    // Transaction ready
     reg     [27:0]  r_SD_Addr;  // Address to read from or write to in SD_RAM
     reg     [127:0] r_SD_Data;  // SD read/write register
@@ -186,7 +184,7 @@ module sdram_ddr_wrapper (
             // If both upper and lower byte are found set ready flag
             // and return to idle
             if (v_byte_found == v_byte_select) begin
-                r_ready <= 1'b1; 
+                //r_ready <= 1'b1; 
             end
         end
     endtask
@@ -229,7 +227,7 @@ module sdram_ddr_wrapper (
             // If both upper and lower byte are found set ready flag
             // and return to idle
             if (v_byte_found == v_byte_select) begin
-                r_ready <= 1'b1; 
+                //r_ready <= 1'b1; 
             end
         end
     endtask
@@ -263,7 +261,7 @@ module sdram_ddr_wrapper (
     endtask
 
     // Read SDRAM done
-    task task_read_sdram_done;
+    task task_read_done_rdram;
         input [5:0] next_on_read;
         input [5:0] next_on_write;
         begin
@@ -326,7 +324,6 @@ module sdram_ddr_wrapper (
     always @(posedge ui_clk) begin
         case (cache_state) 
             STATE_START: begin
-                r_busy <= 1'b1;
                 r_ready <= 1'b0; // Nothing is ready
                 if(init_calib_complete == 1'b1) begin
                     cache_state <= STATE_IDLE;
@@ -334,10 +331,10 @@ module sdram_ddr_wrapper (
             end
             // Wait for new command
             STATE_IDLE: begin
-                r_busy <= 1'b0; // Idle
-                r_ready <= 1'b0; // Nothing is ready
+                r_ready <= 1'b1; // Ready strobe
+
                 if (wrap_CS == 1'b1) begin
-                    r_busy <= 1'b1; // Busy
+                    r_ready <= 1'b0; // Ready strobe
                     r_L <= wrap_L;
                     r_U <= wrap_U;
                     r_WE <= wrap_WE;
@@ -366,7 +363,7 @@ module sdram_ddr_wrapper (
             end
             // Handle cache update whin read is done
             STATE_READ_DONE_SDRAM: begin
-                task_read_sdram_done(STATE_READ_CACHE, STATE_WRITE_CACHE);
+                task_read_done_rdram(STATE_READ_CACHE, STATE_WRITE_CACHE);
             end
             // Write to cache, if not available read from SDRAM
             STATE_WRITE_CACHE: begin
@@ -382,7 +379,7 @@ module sdram_ddr_wrapper (
             end
             // return result
             STATE_RETURN_RESULT: begin
-                r_ready <= 1'b1;
+                //r_ready <= 1'b1;
                 cache_state <= STATE_IDLE;
             end
         endcase
@@ -392,8 +389,6 @@ module sdram_ddr_wrapper (
     assign wrap_ready = r_ready;
     assign wrap_RD = r_RD[15:0];
 	assign wrap_RD48 = r_RD[63:16];
-    assign wrap_ready = r_ready;
-    assign wrap_busy = r_busy;
     assign o_ui_clk = ui_clk;
 
     
@@ -442,35 +437,6 @@ module sdram_ddr_wrapper (
 		.sys_clk_i                      (clk),
 		.sys_rst                        (i_rst) // input sys_rst
     );
-
-    /*
-    *       //// CACHE registers
-      reg [5:0]       cache_state = STATE_START;
-      reg [2:0]       cache_ptr = 3'b0;
-      reg [2:0]       cache_e_set = 3'b0;
-      reg [15:0]      cache_e_mask  [3:0];
-      reg [127:0]     cache_e_data  [3:0];
-      reg [27:0]      cache_e_addr  [3:0];  
-      */
-
-`ifdef ALI_DEBUG
-    ila_1 your_instance_name (
-        .clk(ui_clk), // input wire clk
-
-        .probe0(cache_e_mask[0]), // input wire [15:0]  probe0  
-        .probe1(cache_e_data[0]), // input wire [127:0]  probe1 
-        .probe2(cache_e_data[1]), // input wire [127:0]  probe2 
-        .probe3(cache_e_data[2]), // input wire [127:0]  probe3 
-        .probe4(app_rd_data), // input wire [127:0]  probe4 
-        .probe5(cache_e_addr[0]), // input wire [27:0]  probe5 
-        .probe6(cache_e_addr[1]), // input wire [27:0]  probe6 
-        .probe7(cache_e_addr[2]), // input wire [27:0]  probe7 
-        .probe8(cache_e_addr[3]), // input wire [27:0]  probe8 
-        .probe9(cache_state), // input wire [5:0]  probe9 
-        .probe10(cache_ptr), // input wire [2:0]  probe10 
-        .probe11(cache_e_mask[1]) // input wire [15:0]  probe11
-    );
-`endif
 
 endmodule
 // Advance pointer when read is donepp_rd_data

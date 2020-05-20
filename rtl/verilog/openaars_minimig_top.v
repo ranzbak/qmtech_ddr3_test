@@ -24,6 +24,7 @@
 module openaars_minimig_top(
     // Core board
     input          i_clk,        // Main clock from the oscillator 
+    input          i_rst_n,
     output         o_core_led,   // LED 
      
     // DDR3 Inouts
@@ -56,6 +57,9 @@ module openaars_minimig_top(
     // System wires
     wire           clk;
     wire           ui_clk;
+    wire           clk_28;
+    wire           clk_28_90;
+    wire           clk_7;
     //wire           clk200;
     wire           locked;
     
@@ -75,7 +79,6 @@ module openaars_minimig_top(
     wire    [15:0]  w_RD;     // Data to read 16-bit
     wire    [47:0]  w_RD48;   // Data to read additional 48-bit
     wire            w_ready;  // Transaction ready
-    wire            w_busy;   // High during transactions when busy
 
     // Pattern generator
     reg             r_flip_pat = 1'b0; // Flip the pattern
@@ -84,13 +87,14 @@ module openaars_minimig_top(
     clk_wiz_0 instance_name
     (
         // Clock out ports
-        //.clk_out166(clk),      // output clk_out100
         .clk_out200(clk),   // output clk_out200
+        .clk_out28(clk_28), // output clk_out28
         // Status and control signals
         .locked(locked),       // output locked
         // Clock in ports
-        .clk_in50(i_clk)       // input clk_in50
+        .clk_in50(i_clk)
     );
+
     
     // Enable LED on the board as test
     always @(posedge ui_clk) begin
@@ -116,7 +120,6 @@ module openaars_minimig_top(
         .wrap_RD48(w_RD48),     // Data to read 48-bits extra
         .wrap_big_r(r_flip_pat),      // When asserted, read 64-bit instead of 16
         .wrap_ready(w_ready),   // Transaction ready
-        .wrap_busy(w_busy),     // High during transactions
 
         
         //// SDRAM DDR3 ////
@@ -159,10 +162,12 @@ module openaars_minimig_top(
     reg [4:0] test_state = STATE_IDLE;
     reg [28:0] r_cur_addr = 29'b0;
     reg [15:0] v_pattern;
+
     always @(posedge ui_clk) begin
+    //always @(posedge clk_28) begin
         case (test_state)
             STATE_IDLE: begin
-                if (w_busy == 1'b0) begin
+                if (w_ready == 1'b1) begin
                     test_state <= STATE_WRITE;
                 end
             end
@@ -173,11 +178,13 @@ module openaars_minimig_top(
                 r_WE <= 1'b1;
                 r_L <= 1'b1;
                 r_U <= 1'b1;
-                test_state <= STATE_WRITE_DONE;
+                if (w_ready == 1'b0) begin
+                    test_state <= STATE_WRITE_DONE;
+                end
             end
             STATE_WRITE_DONE: begin
                 // Deassert signals
-                if(w_busy == 1'b1) begin
+                if(w_ready == 1'b0) begin
                     r_CS <= 1'b0;
                     r_WR <= 16'h0;
                     r_Addr <= 32'b0;
@@ -198,11 +205,13 @@ module openaars_minimig_top(
                 r_L <= 1'b1;
                 r_U <= 1'b1;
                 
-                test_state <= STATE_READ_DONE;
+                if (w_ready == 1'b0) begin
+                    test_state <= STATE_READ_DONE;
+                end
             end
             STATE_READ_DONE: begin
                 // Deassert signals
-                if (w_busy == 1'b1) begin
+                if (w_ready == 1'b0) begin
                     r_CS <= 1'b0;
                     r_Addr <= 32'b0;
                     r_L <= 1'b0;
@@ -242,20 +251,24 @@ module openaars_minimig_top(
     ila_0 your_instance_name (
         .clk(ui_clk), // input wire clk
 
-        .probe0(r_cur_addr),           // input wire [31:0] probe0
-        .probe1(r_CS),                 // input wire [0:0]  probe1
-        .probe2(r_L),                  // input wire [0:0]  probe2
-        .probe3(r_U),                  // input wire [0:0]  probe3
-        .probe4(r_WR),                 // input wire [15:0] probe4
-        .probe5(r_WE),                 // input wire        probe5
-        .probe6({w_RD, w_RD48}),       // input wire [63:0] probe6
-        .probe7(test_state),           // input wire [5:0]  probe7
-        .probe8(my_sdram.cache_state), // input with [5:0]  probe8
-        .probe9(w_busy),               // input wire        probe9
-        .probe10(my_sdram.v_byte_found[0]),  // input wire        probe10
-        .probe11(w_ready),             // input wire        probe11
-        .probe12(o_leds[1]),           // input wire        probe12 
-        .probe13(r_Addr)               // input wire [31:0] probe13
+        .probe0(r_cur_addr),                // input wire [31:0] probe0
+        .probe1(r_CS),                      // input wire [0:0]  probe1
+        .probe2(r_L),                       // input wire [0:0]  probe2
+        .probe3(r_U),                       // input wire [0:0]  probe3
+        .probe4(r_WR),                      // input wire [15:0] probe4
+        .probe5(my_sdram.r_WE),             // input wire        probe5
+        .probe6({w_RD, w_RD48}),            // input wire [63:0] probe6
+        .probe7(test_state),                // input wire [5:0]  probe7
+        .probe8(my_sdram.cache_state),      // input with [5:0]  probe8
+        .probe9(v_pattern),                 // input wire        probe9
+        .probe10(my_sdram.v_byte_found[0]), // input wire        probe10
+        .probe11(w_ready),                  // input wire        probe11
+        .probe12(o_leds[1]),                // input wire        probe12
+        .probe13(r_Addr),                   // input wire [31:0] probe13
+        .probe14(my_sdram.cache_e_data[0]), // input wire [127:0]  probe14
+        .probe15(my_sdram.cache_e_data[1]), // input wire [127:0]  probe15
+        .probe16(my_sdram.cache_e_data[2]), // input wire [127:0]  probe16
+        .probe17(my_sdram.cache_e_data[3])  // input wire [127:0]  probe17
     );
 `endif
     

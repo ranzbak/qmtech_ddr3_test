@@ -47,7 +47,6 @@ module openaars_minimig_top(
     
     output [0:0]   ddr3_odt,
     
-    output         tg_compare_error,
     output         init_calib_complete,
     
     // Open AARS pins
@@ -88,7 +87,7 @@ module openaars_minimig_top(
     (
         // Clock out ports
         .clk_out200(clk),   // output clk_out200
-        .clk_out28(clk_28), // output clk_out28
+        .clk_out28(), // output clk_out28
         // Status and control signals
         .locked(locked),       // output locked
         // Clock in ports
@@ -101,10 +100,27 @@ module openaars_minimig_top(
         // Turn on LED
         r_core_led <= 1'b1;
     end
+
+    // Devide ui_clk by 7 to get +-28.54 MHz clock
+    // wire w_clk_28_;
+    BUFR #(
+        .BUFR_DIVIDE("7")
+    ) ui_clk_inst (
+        .O(clk_28),
+        .CE(1'b1),
+        .CLR(1'b0),
+        .I(ui_clk)
+    );
+
+    // BUFMR BUFMR_inst (
+    //     .O(clk_28),
+    //     .I(w_clk_28_)
+    // );
     
     // SDRAM wrapper
     sdram_ddr_wrapper my_sdram (
         .clk(clk),
+        .clk_rtl(clk_28),
         .i_rst(~locked),
         .o_ui_clk(ui_clk),
         
@@ -144,7 +160,6 @@ module openaars_minimig_top(
         
         .ddr3_odt(ddr3_odt),
         
-        .tg_compare_error(tg_compare_error),
         .init_calib_complete(init_calib_complete)
     );
 
@@ -163,8 +178,8 @@ module openaars_minimig_top(
     reg [28:0] r_cur_addr = 29'b0;
     reg [15:0] v_pattern;
 
-    always @(posedge ui_clk) begin
-    //always @(posedge clk_28) begin
+    //always @(posedge ui_clk) begin
+    always @(posedge clk_28) begin
         case (test_state)
             STATE_IDLE: begin
                 if (w_ready == 1'b1) begin
@@ -251,24 +266,25 @@ module openaars_minimig_top(
     ila_0 your_instance_name (
         .clk(ui_clk), // input wire clk
 
-        .probe0(r_cur_addr),                // input wire [31:0] probe0
-        .probe1(r_CS),                      // input wire [0:0]  probe1
-        .probe2(r_L),                       // input wire [0:0]  probe2
-        .probe3(r_U),                       // input wire [0:0]  probe3
-        .probe4(r_WR),                      // input wire [15:0] probe4
-        .probe5(my_sdram.r_WE),             // input wire        probe5
-        .probe6({w_RD, w_RD48}),            // input wire [63:0] probe6
-        .probe7(test_state),                // input wire [5:0]  probe7
-        .probe8(my_sdram.cache_state),      // input with [5:0]  probe8
-        .probe9(v_pattern),                 // input wire        probe9
-        .probe10(my_sdram.v_byte_found[0]), // input wire        probe10
-        .probe11(w_ready),                  // input wire        probe11
-        .probe12(o_leds[1]),                // input wire        probe12
-        .probe13(r_Addr),                   // input wire [31:0] probe13
-        .probe14(my_sdram.cache_e_data[0]), // input wire [127:0]  probe14
-        .probe15(my_sdram.cache_e_data[1]), // input wire [127:0]  probe15
-        .probe16(my_sdram.cache_e_data[2]), // input wire [127:0]  probe16
-        .probe17(my_sdram.cache_e_data[3])  // input wire [127:0]  probe17
+        .probe0(r_cur_addr),                              // input wire [31:0] probe0
+        .probe1(r_CS),                                    // input wire [0:0]  probe1
+        .probe2(r_L),                                     // input wire [0:0]  probe2
+        .probe3(r_U),                                     // input wire [0:0]  probe3
+        .probe4(r_WR),                                    // input wire [15:0] probe4
+        .probe5(my_sdram.my_sdram_ctrl.r_WE),             // input wire        probe5
+        .probe6({w_RD, w_RD48}),                          // input wire [63:0] probe6
+        .probe7(test_state),                              // input wire [5:0]  probe7
+        .probe8(my_sdram.my_sdram_ctrl.cache_state),      // input with [5:0]  probe8
+        .probe9(v_pattern),                               // input wire        probe9
+        // .probe10(my_sdram.my_sdram_ctrl.v_byte_found[0]), // input wire        probe10
+        .probe10(clk_28),                                 // input wire        probe10
+        .probe11(w_ready),                                // input wire        probe11
+        .probe12(o_leds[1]),                              // input wire        probe12
+        .probe13(r_Addr),                                 // input wire [31:0] probe13
+        .probe14(my_sdram.my_sdram_ctrl.cache_e_data[0]), // input wire [127:0]  probe14
+        .probe15(my_sdram.my_sdram_ctrl.cache_e_data[1]), // input wire [127:0]  probe15
+        .probe16(my_sdram.my_sdram_ctrl.cache_e_data[2]), // input wire [127:0]  probe16
+        .probe17(my_sdram.my_sdram_ctrl.cache_e_data[3])  // input wire [127:0]  probe17
     );
 `endif
     

@@ -51,5 +51,12 @@ set_property PACKAGE_PIN J25 [get_ports init_calib_complete]
 #set_property IBUF_LOW_PWR FALSE [get_ports {ddr3_dq[14]}]
 #set_property IBUF_LOW_PWR FALSE [get_ports {ddr3_dq[15]}]
 
-set_property PACKAGE_PIN J26 [get_ports tg_compare_error]
-set_property IOSTANDARD LVCMOS33 [get_ports tg_compare_error]
+#set_property PACKAGE_PIN J26 [get_ports tg_compare_error]
+#set_property IOSTANDARD LVCMOS33 [get_ports tg_compare_error]
+
+
+
+
+
+
+
